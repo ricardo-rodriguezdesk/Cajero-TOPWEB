@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cajero Automático</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/atm.css">
+</head>
+<body>
+  <main class="cajero">
+    <header class="marquesina">
+      <strong>Banco Central</strong>
+      <span id="nombre-cajero">Cajero automático</span>
+      <span class="modo" id="modo"></span>
+    </header>
+
+    <section class="pantalla" aria-live="polite">
+
+      <!-- Cargando -->
+      <div class="vista activa" data-vista="cargando">
+        <div class="girando"></div>
+        <p class="subtitulo">Iniciando cajero…</p>
+      </div>
+
+      <!-- Fuera de servicio -->
+      <div class="vista falla" data-vista="fuera">
+        <div class="resultado-icono">⛔</div>
+        <h1 class="titulo">Fuera de servicio</h1>
+        <p class="subtitulo">Este cajero no está conectado al Banco Central. Contacte al administrador.</p>
+        <button class="opcion ancha secundaria" data-accion="reintentar">Reintentar</button>
+      </div>
+
+      <!-- Ingresar cuenta -->
+      <div class="vista" data-vista="inicio">
+        <h1 class="titulo">Bienvenido</h1>
+        <p class="subtitulo">Ingrese su número de cuenta</p>
+        <div class="display" id="display-cuenta"></div>
+        <p class="pista">Use el teclado y presione <b>Continuar</b>.</p>
+      </div>
+
+      <!-- Menú -->
+      <div class="vista" data-vista="menu">
+        <h1 class="titulo" id="saludo">Hola</h1>
+        <p class="subtitulo">Cuenta <span id="cuenta-menu" class="detalle"></span> · ¿Qué desea hacer?</p>
+        <div class="opciones">
+          <button class="opcion" data-accion="saldo">Consultar saldo</button>
+          <button class="opcion" data-accion="retiro">Retirar efectivo</button>
+          <button class="opcion" data-accion="deposito">Depositar</button>
+          <button class="opcion secundaria" data-accion="terminar">Terminar</button>
+        </div>
+      </div>
+
+      <!-- Elegir monto -->
+      <div class="vista" data-vista="monto">
+        <h1 class="titulo" id="titulo-monto">Retirar efectivo</h1>
+        <p class="subtitulo">Elija un monto</p>
+        <div class="opciones">
+          <button class="opcion" data-monto="100"><span class="monto">$100</span></button>
+          <button class="opcion" data-monto="300"><span class="monto">$300</span></button>
+          <button class="opcion" data-monto="500"><span class="monto">$500</span></button>
+          <button class="opcion" data-monto="1000"><span class="monto">$1,000</span></button>
+          <button class="opcion ancha" data-accion="otra">Otra cantidad</button>
+          <button class="opcion ancha secundaria" data-accion="menu">Regresar</button>
+        </div>
+      </div>
+
+      <!-- Otra cantidad -->
+      <div class="vista" data-vista="otra">
+        <h1 class="titulo" id="titulo-otra">Otra cantidad</h1>
+        <p class="subtitulo" id="pista-otra">Ingrese el monto</p>
+        <div class="display" id="display-monto"></div>
+        <p class="pista">Presione <b>Continuar</b> para confirmar o <b>Cancelar</b> para regresar.</p>
+      </div>
+
+      <!-- Procesando -->
+      <div class="vista" data-vista="procesando">
+        <div class="girando"></div>
+        <h1 class="titulo">Procesando…</h1>
+        <p class="subtitulo">Comunicándose con el Banco Central</p>
+      </div>
+
+      <!-- Resultado -->
+      <div class="vista" data-vista="resultado">
+        <div class="resultado-icono" id="res-icono"></div>
+        <h1 class="titulo" id="res-titulo"></h1>
+        <div class="cifra" id="res-cifra"></div>
+        <p class="subtitulo" id="res-texto"></p>
+        <span class="etiqueta-origen" id="res-origen"></span>
+        <p class="detalle" id="res-detalle"></p>
+        <div class="opciones">
+          <button class="opcion" data-accion="menu">Otra operación</button>
+          <button class="opcion secundaria" data-accion="terminar">Terminar</button>
+        </div>
+      </div>
+
+    </section>
+
+    <div class="ranura" aria-hidden="true"></div>
+
+    <section class="teclado" aria-label="Teclado del cajero">
+      <button class="tecla" data-tecla="1">1</button>
+      <button class="tecla" data-tecla="2">2</button>
+      <button class="tecla" data-tecla="3">3</button>
+      <button class="tecla funcion cancelar" data-tecla="cancelar">Cancelar</button>
+      <button class="tecla" data-tecla="4">4</button>
+      <button class="tecla" data-tecla="5">5</button>
+      <button class="tecla" data-tecla="6">6</button>
+      <button class="tecla funcion borrar" data-tecla="borrar">Borrar</button>
+      <button class="tecla" data-tecla="7">7</button>
+      <button class="tecla" data-tecla="8">8</button>
+      <button class="tecla" data-tecla="9">9</button>
+      <button class="tecla funcion continuar" data-tecla="continuar">Continuar</button>
+      <span class="tecla vacia"></span>
+      <button class="tecla" data-tecla="0">0</button>
+      <span class="tecla vacia"></span>
+      <span class="tecla vacia"></span>
+    </section>
+
+    <p class="pie"><a href="/admin">Panel administrativo</a></p>
+  </main>
+
+  <script src="/js/atm.js"></script>
+</body>
+</html>

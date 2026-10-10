@@ -1,0 +1,461 @@
+openapi: 3.0.3
+info:
+  title: Nodo Cajero Automático (ATM)
+  version: 1.0.0
+  description: |
+    API del **cajero automático** del Sistema Bancario Distribuido.
+
+    El cajero opera de forma **descentralizada** (tiene su propia base de datos PostgreSQL,
+    valida montos y su propio efectivo sin consultar a nadie y registra cada operación en
+    su bitácora) y delega en el **Banco Central** todo lo que afecta saldos y transacciones
+    oficiales (consolidación centralizada). Para hablar con el Central usa su API Key
+    (ver `contrato-central-atm.yaml`).
+
+    ## Formato de errores
+    ```json
+    { "error": "Fondos insuficientes", "codigo": "FONDOS_INSUFICIENTES", "origen": "central" }
+    ```
+    `origen` indica qué nodo rechazó la operación: `cajero` (regla local) o `central`.
+
+    ## Reglas que aplica el cajero
+    | Regla | Descripción | Código |
+    |---|---|---|
+    | RN1 | Sin API Key o sin efectivo sincronizado, el cajero está fuera de servicio | `CAJERO_NO_CONFIGURADO`, `CAJERO_NO_SINCRONIZADO` |
+    | RN4 | El monto debe ser mayor a 0 | `MONTO_INVALIDO` |
+    | Extra | Monto múltiplo de $50 y máximo por operación | `MONTO_NO_MULTIPLO`, `MONTO_EXCEDE_LIMITE` |
+    | RN6 | El efectivo del cajero debe alcanzar (se valida antes de llamar al Central) | `CAJERO_SIN_EFECTIVO` |
+    | RN7 | Si el Central rechaza o no responde, el efectivo del cajero no cambia | — |
+
+    Las reglas de cuenta activa y saldo suficiente las valida el Banco Central.
+servers:
+  - url: https://tu-cajero.vercel.app
+    description: Producción en Vercel (reemplazar por la URL real)
+  - url: http://localhost:3000
+    description: Local
+
+tags:
+  - name: Cliente
+    description: Operaciones que usa la interfaz del cajero
+  - name: Administración
+    description: Panel administrativo del cajero (requiere sesión)
+
+paths:
+  /api/status:
+    get:
+      tags: [Cliente]
+      summary: Estado del cajero
+      responses:
+        '200':
+          description: Estado actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  en_servicio: { type: boolean }
+                  nombre: { type: string, nullable: true }
+                  modo: { type: string, enum: [simulador, real] }
+                  limites:
+                    type: object
+                    properties:
+                      MULTIPLO: { type: number }
+                      MAX_RETIRO: { type: number }
+                      MAX_DEPOSITO: { type: number }
+              example:
+                en_servicio: true
+                nombre: Cajero Plaza Centro
+                modo: real
+                limites: { MULTIPLO: 50, MAX_RETIRO: 10000, MAX_DEPOSITO: 20000 }
+
+  /api/balance/{cuenta}:
+    get:
+      tags: [Cliente]
+      summary: Consultar saldo (lo responde el Banco Central)
+      parameters:
+        - name: cuenta
+          in: path
+          required: true
+          schema: { type: string }
+          example: '1000000001'
+      responses:
+        '200':
+          description: Cuenta encontrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cuenta' }
+              example: { numero_cuenta: '1000000001', titular: Juan Pérez, saldo: 1000.00, estado: activa }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+
+  /api/withdraw:
+    post:
+      tags: [Cliente]
+      summary: Retirar efectivo
+      description: |
+        1. RN1: ¿cajero en servicio?
+        2. RN4: ¿monto válido?
+        3. RN6: ¿alcanza el efectivo del cajero? (sin llamar al Central)
+        4. El Banco Central valida la cuenta y el saldo, descuenta y registra la transacción.
+        5. RN7: solo si el Central aprueba se actualiza el efectivo local.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperacionRequest' }
+            example: { numero_cuenta: '1000000001', monto: 300 }
+      responses:
+        '200':
+          description: Retiro aprobado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperacionResponse' }
+              example:
+                mensaje: 'Retire su efectivo: $300.00'
+                monto: 300
+                saldo_nuevo: 700
+                transaccion: { id: 152, tipo: retiro, fecha: '2026-10-20T17:30:00Z' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422':
+          description: Regla de negocio violada (del cajero o del Central)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                cajero:
+                  summary: Rechazo local del cajero (RN6)
+                  value: { error: Este cajero no tiene efectivo suficiente para ese monto, codigo: CAJERO_SIN_EFECTIVO, origen: cajero }
+                central:
+                  summary: Rechazo del Banco Central
+                  value: { error: Fondos insuficientes, codigo: FONDOS_INSUFICIENTES, origen: central }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+
+  /api/deposit:
+    post:
+      tags: [Cliente]
+      summary: Depositar efectivo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperacionRequest' }
+            example: { numero_cuenta: '1000000001', monto: 500 }
+      responses:
+        '200':
+          description: Depósito aprobado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperacionResponse' }
+              example:
+                mensaje: 'Depósito recibido: $500.00'
+                monto: 500
+                saldo_nuevo: 1200
+                transaccion: { id: 153, tipo: deposito, fecha: '2026-10-20T17:35:00Z' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+
+  /admin/api/login:
+    post:
+      tags: [Administración]
+      summary: Iniciar sesión en el panel (contraseña ADMIN_PASSWORD)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        '200':
+          description: Sesión iniciada (cookie atm_admin, 8 horas)
+        '401': { $ref: '#/components/responses/Error' }
+
+  /admin/api/logout:
+    post:
+      tags: [Administración]
+      summary: Cerrar sesión
+      security: []
+      responses:
+        '200': { description: Sesión cerrada }
+
+  /admin/api/config:
+    get:
+      tags: [Administración]
+      summary: Ver configuración y estado del cajero
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Configuración actual
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigAdmin' }
+        '401': { $ref: '#/components/responses/Error' }
+    put:
+      tags: [Administración]
+      summary: Guardar URL del Central y/o API Key, y conectar
+      description: Guarda los datos y luego consulta al Central para sincronizar el efectivo asignado.
+      security: [{ AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                central_url: { type: string, format: uri, example: 'https://central.ejemplo.com' }
+                api_key: { type: string, example: atm_xxxxxxxxxxxxxxxx }
+      responses:
+        '200':
+          description: Configuración guardada. `conexion` indica si se pudo conectar.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ConfigAdmin'
+                  - type: object
+                    properties:
+                      conexion:
+                        type: object
+                        properties:
+                          ok: { type: boolean }
+                          nodo: { $ref: '#/components/schemas/Nodo' }
+                          error: { type: string }
+                          codigo: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Administración]
+      summary: Poner el cajero fuera de servicio (borra la API Key)
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Cajero fuera de servicio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigAdmin' }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /admin/api/operaciones:
+    get:
+      tags: [Administración]
+      summary: Bitácora de operaciones (base de datos del cajero)
+      security: [{ AdminSession: [] }]
+      parameters:
+        - name: estado
+          in: query
+          schema: { type: string, enum: [pendiente, aprobada, rechazada_cajero, rechazada_central, error_comunicacion] }
+        - name: tipo
+          in: query
+          schema: { type: string, enum: [consulta, retiro, deposito] }
+        - name: limite
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Operaciones, de la más reciente a la más antigua
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OperacionLocal' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /admin/api/resumen:
+    get:
+      tags: [Administración]
+      summary: Totales del día
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Resumen de hoy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  retiros: { type: integer }
+                  monto_retiros: { type: number }
+                  depositos: { type: integer }
+                  monto_depositos: { type: number }
+                  consultas: { type: integer }
+                  rechazadas_cajero: { type: integer }
+                  rechazadas_central: { type: integer }
+                  errores_comunicacion: { type: integer }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /admin/api/eventos:
+    get:
+      tags: [Administración]
+      summary: Bitácora administrativa (configuraciones, cuadres, fallas de conexión)
+      security: [{ AdminSession: [] }]
+      parameters:
+        - name: limite
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Eventos recientes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    tipo: { type: string, enum: [configuracion, sincronizacion, conexion_fallida, fuera_de_servicio] }
+                    detalle: { type: object }
+                    fecha: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /admin/api/test:
+    post:
+      tags: [Administración]
+      summary: Probar conexión con el Banco Central
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: La API Key es válida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  nodo: { $ref: '#/components/schemas/Nodo' }
+        '401': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+
+  /admin/api/sync:
+    post:
+      tags: [Administración]
+      summary: Sincronizar el efectivo local con el efectivo oficial del Central (cuadre)
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Efectivo sincronizado; `cuadre` muestra la diferencia que había
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ConfigAdmin'
+                  - type: object
+                    properties:
+                      cuadre:
+                        type: object
+                        properties:
+                          efectivo_local: { type: number, nullable: true }
+                          efectivo_central: { type: number }
+                          diferencia: { type: number, nullable: true }
+        '401': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    AdminSession:
+      type: apiKey
+      in: cookie
+      name: atm_admin
+      description: Cookie firmada que entrega /admin/api/login
+
+  schemas:
+    Cuenta:
+      type: object
+      properties:
+        numero_cuenta: { type: string }
+        titular: { type: string }
+        saldo: { type: number }
+        estado: { type: string, enum: [activa, bloqueada] }
+
+    OperacionRequest:
+      type: object
+      required: [numero_cuenta, monto]
+      properties:
+        numero_cuenta: { type: string }
+        monto: { type: number, description: 'Mayor a 0 y múltiplo de $50' }
+
+    OperacionResponse:
+      type: object
+      properties:
+        mensaje: { type: string }
+        monto: { type: number }
+        saldo_nuevo: { type: number }
+        operacion_local: { type: integer, description: 'Id en la bitácora del cajero (atm_operaciones)' }
+        transaccion:
+          type: object
+          properties:
+            id: { type: integer }
+            tipo: { type: string, enum: [retiro, deposito] }
+            fecha: { type: string, format: date-time }
+
+    Nodo:
+      type: object
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        tipo: { type: string }
+        estado: { type: string }
+        responsable: { type: string, nullable: true }
+        efectivo_disponible: { type: number }
+
+    ConfigAdmin:
+      type: object
+      properties:
+        en_servicio: { type: boolean }
+        central_url: { type: string, nullable: true }
+        api_key: { type: string, nullable: true, description: 'Enmascarada, nunca se devuelve completa' }
+        efectivo_local: { type: number, nullable: true }
+        sincronizado_en: { type: string, format: date-time, nullable: true }
+        nodo:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            nombre: { type: string }
+            estado: { type: string }
+            responsable: { type: string, nullable: true }
+        modo: { type: string, enum: [simulador, real] }
+        base_de_datos: { type: string, enum: [conectada] }
+
+    OperacionLocal:
+      type: object
+      properties:
+        id: { type: integer }
+        tipo: { type: string, enum: [consulta, retiro, deposito] }
+        cuenta: { type: string, example: '••••0001' }
+        monto: { type: number, nullable: true }
+        estado: { type: string, enum: [pendiente, aprobada, rechazada_cajero, rechazada_central, error_comunicacion] }
+        codigo: { type: string, nullable: true }
+        mensaje: { type: string, nullable: true }
+        folio_central: { type: integer, nullable: true }
+        efectivo_despues: { type: number, nullable: true }
+        fecha: { type: string, format: date-time }
+
+    Error:
+      type: object
+      required: [error, codigo, origen]
+      properties:
+        error: { type: string }
+        codigo: { type: string }
+        origen: { type: string, enum: [cajero, central] }
+
+  responses:
+    Error:
+      description: Error con el formato estándar
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

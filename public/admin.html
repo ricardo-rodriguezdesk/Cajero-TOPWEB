@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel del Cajero</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+  <!-- Login -->
+  <main class="login" id="vista-login" hidden>
+    <form class="tarjeta" id="form-login">
+      <p class="eyebrow">Cajero automático</p>
+      <h1>Panel administrativo</h1>
+      <label for="password">Contraseña</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button class="btn primario" type="submit">Entrar</button>
+      <p class="mensaje" id="msg-login" role="alert"></p>
+      <a class="enlace" href="/">← Ir al cajero</a>
+    </form>
+  </main>
+
+  <!-- Panel -->
+  <div class="panel" id="vista-panel" hidden>
+    <header class="barra">
+      <div>
+        <p class="eyebrow">Panel administrativo</p>
+        <h1 id="titulo-nodo">Cajero automático</h1>
+      </div>
+      <div class="barra-acciones">
+        <span class="pastilla" id="pastilla-estado">—</span>
+        <a class="btn" href="/">Ver cajero</a>
+        <button class="btn" id="btn-salir">Salir</button>
+      </div>
+    </header>
+
+    <p class="mensaje banner" id="msg-panel" role="status" hidden></p>
+
+    <!-- Resumen de hoy -->
+    <section class="indicadores" aria-label="Resumen de hoy">
+      <div class="indicador">
+        <span class="indicador-etiqueta">Efectivo en el cajero</span>
+        <span class="indicador-valor" id="k-efectivo">—</span>
+        <span class="indicador-nota" id="k-sync">Sin sincronizar</span>
+      </div>
+      <div class="indicador">
+        <span class="indicador-etiqueta">Retiros hoy</span>
+        <span class="indicador-valor" id="k-retiros">—</span>
+        <span class="indicador-nota" id="k-retiros-n">—</span>
+      </div>
+      <div class="indicador">
+        <span class="indicador-etiqueta">Depósitos hoy</span>
+        <span class="indicador-valor" id="k-depositos">—</span>
+        <span class="indicador-nota" id="k-depositos-n">—</span>
+      </div>
+      <div class="indicador">
+        <span class="indicador-etiqueta">Rechazos hoy</span>
+        <span class="indicador-valor" id="k-rechazos">—</span>
+        <span class="indicador-nota" id="k-rechazos-d">—</span>
+      </div>
+    </section>
+
+    <section class="cuadricula">
+      <article class="tarjeta">
+        <h2>Estado del nodo</h2>
+        <dl class="datos">
+          <dt>Nodo en el Central</dt><dd id="d-nodo">—</dd>
+          <dt>Responsable</dt><dd id="d-responsable">—</dd>
+          <dt>Estado en el Central</dt><dd id="d-estado">—</dd>
+          <dt>API Key</dt><dd class="mono" id="d-key">—</dd>
+          <dt>Banco Central</dt><dd class="mono" id="d-url">—</dd>
+          <dt>Modo</dt><dd id="d-modo">—</dd>
+          <dt>Base de datos del cajero</dt><dd id="d-bd">—</dd>
+        </dl>
+        <div class="acciones">
+          <button class="btn" id="btn-probar">Probar conexión</button>
+          <button class="btn" id="btn-sync">Sincronizar efectivo (cuadre)</button>
+        </div>
+      </article>
+
+      <article class="tarjeta">
+        <h2>Conexión con el Banco Central</h2>
+        <p class="ayuda">Pega la API Key que generó el panel del Banco Central para este cajero. Se guarda cifrada en la base de datos del cajero. Al guardar, el cajero se conecta y descarga su efectivo asignado.</p>
+        <form id="form-config">
+          <label for="central-url">URL de la API del Banco Central</label>
+          <input id="central-url" type="url" placeholder="https://central.ejemplo.com" autocomplete="off">
+          <label for="api-key">API Key</label>
+          <input id="api-key" type="password" placeholder="Pega aquí la key (déjalo vacío para conservar la actual)" autocomplete="off">
+          <button class="btn primario" type="submit">Guardar y conectar</button>
+        </form>
+        <hr>
+        <h3>Zona de riesgo</h3>
+        <p class="ayuda">Borra la API Key de este cajero. Dejará de operar hasta que se configure una nueva.</p>
+        <button class="btn peligro" id="btn-reset">Poner fuera de servicio</button>
+      </article>
+    </section>
+
+    <!-- Bitácora -->
+    <section class="tarjeta seccion">
+      <div class="seccion-encabezado">
+        <div>
+          <h2>Bitácora de operaciones</h2>
+          <p class="ayuda">Todo lo que pasó por este cajero, guardado en su propia base de datos. Los registros no se pueden modificar ni borrar.</p>
+        </div>
+        <div class="filtros">
+          <select id="f-tipo" aria-label="Filtrar por tipo">
+            <option value="">Todos los tipos</option>
+            <option value="retiro">Retiros</option>
+            <option value="deposito">Depósitos</option>
+            <option value="consulta">Consultas</option>
+          </select>
+          <select id="f-estado" aria-label="Filtrar por estado">
+            <option value="">Todos los estados</option>
+            <option value="aprobada">Aprobadas</option>
+            <option value="rechazada_cajero">Rechazadas por el cajero</option>
+            <option value="rechazada_central">Rechazadas por el Central</option>
+            <option value="error_comunicacion">Error de comunicación</option>
+          </select>
+          <button class="btn" id="btn-refrescar">Actualizar</button>
+        </div>
+      </div>
+      <div class="tabla-contenedor">
+        <table class="tabla">
+          <thead>
+            <tr>
+              <th>#</th><th>Fecha</th><th>Tipo</th><th>Cuenta</th><th class="num">Monto</th>
+              <th>Resultado</th><th class="num">Folio Central</th><th class="num">Efectivo después</th>
+            </tr>
+          </thead>
+          <tbody id="t-operaciones">
+            <tr><td colspan="8" class="vacio">Sin operaciones</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="tarjeta seccion">
+      <h2>Eventos administrativos</h2>
+      <ul class="eventos" id="l-eventos"><li class="vacio">Sin eventos</li></ul>
+    </section>
+  </div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

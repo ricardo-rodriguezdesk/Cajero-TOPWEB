@@ -1,0 +1,379 @@
+openapi: 3.0.3
+info:
+  title: API Core del Banco Central — Contrato con el Cajero (ATM)
+  version: 1.0.0
+  description: |
+    Contrato entre el **Cajero ATM (Persona 4)** y la **API core del Banco Central (Persona 1)**.
+
+    ## Reglas generales
+    - Todas las peticiones llevan el header `X-API-Key` con la key generada por el Banco Central.
+    - El Central identifica al nodo **por su API Key**. El cajero nunca envía su `node_id`
+      en el body; así un nodo no puede hacerse pasar por otro.
+    - Montos en pesos (MXN), como número con hasta 2 decimales (ej. `300.00`).
+    - Fechas en formato ISO 8601 (UTC).
+    - Todas las respuestas son JSON.
+
+    ## Formato de errores
+    Todos los errores usan el mismo formato:
+    ```json
+    { "error": "Fondos insuficientes", "codigo": "FONDOS_INSUFICIENTES" }
+    ```
+    - `error`: mensaje legible que el cajero puede mostrar al cliente.
+    - `codigo`: identificador fijo para que el cajero reaccione sin depender del texto.
+
+    ## Códigos HTTP
+    | Código | Cuándo |
+    |---|---|
+    | 200 | Operación correcta |
+    | 400 | Petición mal formada (falta un campo, tipo incorrecto) |
+    | 401 | API Key ausente, inválida o revocada |
+    | 403 | El nodo existe pero está inactivo |
+    | 404 | La cuenta no existe |
+    | 422 | Se violó una regla de negocio |
+    | 500 | Error interno del Central |
+
+    ## Catálogo de `codigo`
+    | codigo | HTTP | Significado |
+    |---|---|---|
+    | `DATOS_INVALIDOS` | 400 | Body o parámetros mal formados |
+    | `API_KEY_INVALIDA` | 401 | Key ausente, inexistente o desactivada |
+    | `NODO_INACTIVO` | 403 | El cajero fue desactivado por el Banco Central |
+    | `CUENTA_NO_ENCONTRADA` | 404 | No existe el número de cuenta |
+    | `MONTO_INVALIDO` | 422 | Monto menor o igual a 0 |
+    | `CUENTA_BLOQUEADA` | 422 | La cuenta no está activa |
+    | `FONDOS_INSUFICIENTES` | 422 | Saldo de la cuenta menor al monto |
+    | `EFECTIVO_NODO_INSUFICIENTE` | 422 | El efectivo oficial del cajero no alcanza |
+    | `IDEMPOTENCY_CONFLICT` | 422 | La Idempotency-Key ya se usó con otra cuenta o monto |
+    | `ERROR_INTERNO` | 500 | Falla inesperada |
+
+    ## Requisitos para el Central
+    - Retiro y depósito deben ser **atómicos**: validar, actualizar el saldo de la cuenta,
+      actualizar `nodes.efectivo_disponible` e insertar la transacción en una sola operación.
+    - Cada transacción se registra con el `node_id` del cajero que la originó.
+    - Las transacciones son inmutables (no UPDATE ni DELETE).
+    - Retiro: el saldo de la cuenta y el efectivo del cajero **bajan**.
+    - Depósito: el saldo de la cuenta y el efectivo del cajero **suben**.
+
+    ## Idempotency-Key (implementado en el Central)
+    Header opcional en retiro y depósito. Reglas:
+    - Debe ser un UUID; si no, `400 DATOS_INVALIDOS`.
+    - El cajero genera una key **nueva por cada operación del cliente** y la **reutiliza
+      solo al reintentar esa misma operación** (por ejemplo, tras un timeout).
+    - Misma key + mismo cuerpo → el Central devuelve la respuesta original sin cobrar dos veces.
+    - Misma key con otra cuenta o monto → `422 IDEMPOTENCY_CONFLICT`.
+    - Si la operación falla (fondos insuficientes, etc.) la key no queda guardada y se
+      puede reintentar con la misma.
+
+    ## Para empezar
+    La Persona 1 entrega a la Persona 4: la URL base de la API y una API Key de prueba
+    asociada a un nodo tipo `cajero` con efectivo asignado (ej. $10,000).
+
+servers:
+  - url: https://central.ejemplo.com
+    description: Producción (reemplazar por la URL real del Banco Central)
+  - url: http://localhost:8000
+    description: Local
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Nodo
+    description: Información del cajero que hace la petición
+  - name: Cuentas
+    description: Consulta de cuentas
+  - name: Operaciones
+    description: Retiros y depósitos
+
+paths:
+  /api/node/me:
+    get:
+      tags: [Nodo]
+      summary: Validar la API Key y obtener los datos del cajero
+      description: |
+        El cajero lo usa en el botón "Probar conexión" del panel administrativo
+        y para sincronizar su efectivo local con el efectivo oficial.
+      operationId: getNodeMe
+      responses:
+        '200':
+          description: Key válida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Nodo' }
+              example:
+                id: 7
+                nombre: Cajero Plaza Centro
+                tipo: cajero
+                estado: activo
+                responsable: Ana López
+                efectivo_disponible: 10000.00
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '403': { $ref: '#/components/responses/NodoInactivo' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+
+  /api/accounts/{numero}:
+    get:
+      tags: [Cuentas]
+      summary: Consultar saldo y estado de una cuenta
+      operationId: getAccount
+      parameters:
+        - name: numero
+          in: path
+          required: true
+          description: Número de cuenta
+          schema: { type: string }
+          example: '1000000001'
+      responses:
+        '200':
+          description: Cuenta encontrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cuenta' }
+              example:
+                numero_cuenta: '1000000001'
+                titular: Juan Pérez
+                saldo: 1000.00
+                estado: activa
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '403': { $ref: '#/components/responses/NodoInactivo' }
+        '404': { $ref: '#/components/responses/CuentaNoEncontrada' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+
+  /api/withdraw:
+    post:
+      tags: [Operaciones]
+      summary: Retirar efectivo de una cuenta
+      description: |
+        El Central valida (en este orden): key, nodo activo, monto > 0, cuenta existente,
+        cuenta activa, saldo suficiente y efectivo oficial del cajero suficiente.
+        Si todo es correcto, descuenta el saldo y el efectivo del cajero y registra la
+        transacción tipo `retiro` con el `node_id` del cajero.
+      operationId: withdraw
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperacionRequest' }
+            example:
+              numero_cuenta: '1000000001'
+              monto: 300.00
+      responses:
+        '200':
+          description: Retiro aprobado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperacionResponse' }
+              example:
+                transaccion:
+                  id: 152
+                  tipo: retiro
+                  numero_cuenta: '1000000001'
+                  monto: 300.00
+                  node_id: 7
+                  created_at: '2026-10-20T17:30:00Z'
+                saldo_nuevo: 700.00
+                efectivo_nodo: 9700.00
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '403': { $ref: '#/components/responses/NodoInactivo' }
+        '404': { $ref: '#/components/responses/CuentaNoEncontrada' }
+        '422':
+          description: Regla de negocio violada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                fondos:
+                  summary: Saldo insuficiente
+                  value: { error: Fondos insuficientes, codigo: FONDOS_INSUFICIENTES }
+                bloqueada:
+                  summary: Cuenta bloqueada
+                  value: { error: La cuenta está bloqueada, codigo: CUENTA_BLOQUEADA }
+                efectivo:
+                  summary: Cajero sin efectivo
+                  value: { error: El cajero no tiene efectivo suficiente, codigo: EFECTIVO_NODO_INSUFICIENTE }
+                monto:
+                  summary: Monto inválido
+                  value: { error: El monto debe ser mayor a 0, codigo: MONTO_INVALIDO }
+                idempotencia:
+                  summary: Key reutilizada con otra operación
+                  value: { error: La Idempotency-Key ya se usó con otra operación, codigo: IDEMPOTENCY_CONFLICT }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+
+  /api/deposit:
+    post:
+      tags: [Operaciones]
+      summary: Depositar efectivo a una cuenta
+      description: |
+        El Central valida key, nodo activo, monto > 0, cuenta existente y cuenta activa.
+        Si todo es correcto, aumenta el saldo y el efectivo del cajero y registra la
+        transacción tipo `deposito` con el `node_id` del cajero.
+      operationId: deposit
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperacionRequest' }
+            example:
+              numero_cuenta: '1000000001'
+              monto: 500.00
+      responses:
+        '200':
+          description: Depósito aprobado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperacionResponse' }
+              example:
+                transaccion:
+                  id: 153
+                  tipo: deposito
+                  numero_cuenta: '1000000001'
+                  monto: 500.00
+                  node_id: 7
+                  created_at: '2026-10-20T17:35:00Z'
+                saldo_nuevo: 1200.00
+                efectivo_nodo: 10200.00
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '403': { $ref: '#/components/responses/NodoInactivo' }
+        '404': { $ref: '#/components/responses/CuentaNoEncontrada' }
+        '422':
+          description: Regla de negocio violada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                bloqueada:
+                  summary: Cuenta bloqueada
+                  value: { error: La cuenta está bloqueada, codigo: CUENTA_BLOQUEADA }
+                monto:
+                  summary: Monto inválido
+                  value: { error: El monto debe ser mayor a 0, codigo: MONTO_INVALIDO }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Key generada en el panel del Banco Central para este cajero.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        (Opcional) UUID único por operación del cliente. Se reutiliza solo al reintentar la
+        misma operación. Misma key con otro cuerpo → 422 IDEMPOTENCY_CONFLICT; key que no es
+        UUID → 400 DATOS_INVALIDOS.
+      schema: { type: string, format: uuid }
+
+  schemas:
+    Nodo:
+      type: object
+      required: [id, nombre, tipo, estado, efectivo_disponible]
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        tipo: { type: string, enum: [cajero, sucursal] }
+        estado: { type: string, enum: [activo, inactivo] }
+        responsable: { type: string, nullable: true }
+        efectivo_disponible: { type: number, format: double, minimum: 0 }
+
+    Cuenta:
+      type: object
+      required: [numero_cuenta, titular, saldo, estado]
+      properties:
+        numero_cuenta: { type: string }
+        titular: { type: string }
+        saldo: { type: number, format: double, minimum: 0 }
+        estado: { type: string, enum: [activa, bloqueada] }
+
+    OperacionRequest:
+      type: object
+      required: [numero_cuenta, monto]
+      properties:
+        numero_cuenta: { type: string }
+        monto: { type: number, format: double, exclusiveMinimum: true, minimum: 0 }
+
+    Transaccion:
+      type: object
+      required: [id, tipo, numero_cuenta, monto, node_id, created_at]
+      properties:
+        id: { type: integer }
+        tipo: { type: string, enum: [retiro, deposito, transferencia] }
+        numero_cuenta: { type: string }
+        monto: { type: number, format: double }
+        node_id: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    OperacionResponse:
+      type: object
+      required: [transaccion, saldo_nuevo, efectivo_nodo]
+      properties:
+        transaccion: { $ref: '#/components/schemas/Transaccion' }
+        saldo_nuevo:
+          type: number
+          format: double
+          description: Saldo de la cuenta después de la operación
+        efectivo_nodo:
+          type: number
+          format: double
+          description: Efectivo oficial del cajero después de la operación
+
+    Error:
+      type: object
+      required: [error, codigo]
+      properties:
+        error: { type: string, description: Mensaje legible para mostrar al cliente }
+        codigo:
+          type: string
+          enum:
+            - DATOS_INVALIDOS
+            - API_KEY_INVALIDA
+            - NODO_INACTIVO
+            - CUENTA_NO_ENCONTRADA
+            - MONTO_INVALIDO
+            - CUENTA_BLOQUEADA
+            - FONDOS_INSUFICIENTES
+            - EFECTIVO_NODO_INSUFICIENTE
+            - IDEMPOTENCY_CONFLICT
+            - ERROR_INTERNO
+
+  responses:
+    DatosInvalidos:
+      description: Petición mal formada
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'El campo numero_cuenta es obligatorio', codigo: DATOS_INVALIDOS }
+    NoAutorizado:
+      description: API Key ausente o inválida
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: API Key inválida, codigo: API_KEY_INVALIDA }
+    NodoInactivo:
+      description: El nodo está inactivo
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: El cajero está desactivado, codigo: NODO_INACTIVO }
+    CuentaNoEncontrada:
+      description: La cuenta no existe
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: La cuenta no existe, codigo: CUENTA_NO_ENCONTRADA }
+    ErrorInterno:
+      description: Error interno del Central
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: Error interno del servidor, codigo: ERROR_INTERNO }

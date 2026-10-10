@@ -1,0 +1,28 @@
+{
+  "name": "atm-node",
+  "version": "1.0.0",
+  "description": "Nodo Cajero Automático (ATM) del Sistema Bancario Distribuido",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "db:setup": "node scripts/setup-db.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "atm",
+    "express",
+    "vercel",
+    "banco"
+  ],
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "pg": "^8.23.1"
+  }
+}
