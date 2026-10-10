@@ -2,24 +2,57 @@
 
 Parte del **Sistema Bancario Distribuido**. Este nodo es un backend ligero en **Express** con **su propia base de datos PostgreSQL** (Supabase), una interfaz de cajero y un panel administrativo, desplegado en **Vercel**.
 
-- **Cajero:** `https://<tu-proyecto>.vercel.app`
-- **Panel administrativo:** `https://<tu-proyecto>.vercel.app/admin`
+- **Cajero:** https://cajero-topweb.vercel.app
+- **Panel administrativo:** https://cajero-topweb.vercel.app/admin
+- **Responsable del nodo:** Ricardo Rodríguez Arellano
+
+## Equipo
+
+| Integrante | Rol |
+|---|---|
+| Jorge Laurencio Sánchez Rojas | Persona 1 · Banco Central: base de datos (Supabase) y API core |
+| Emmanuel Reynaldo Gaspar Lara | Persona 2 · Banco Central: panel administrativo y despliegue |
+| Victor Manuel Mendoza Lara | Persona 3 · Sucursal administrativa (Nodo 2) |
+| **Ricardo Rodríguez Arellano** | **Persona 4 · Cajero automático ATM (Nodo 3)** |
+
+## Nodos del sistema
+
+| Nodo | Tecnología | Despliegue | Repositorio |
+|---|---|---|---|
+| Banco Central (panel + API core) | Laravel + Supabase | https://banco-central-panel.onrender.com | https://github.com/ReynaldoEGL/ExamenTWBancoCentral |
+| Sucursal (Nodo 2) | Sucursal administrativa | https://sucursal-nodo2-nyl2.onrender.com/dashboard | https://github.com/Victorml55/sucursal-nodo2-TOPWEB |
+| **Cajero ATM (Nodo 3)** | **Express + Supabase propio** | **https://cajero-topweb.vercel.app** | **https://github.com/ricardo-rodriguezdesk/Cajero-TOPWEB** |
+
+## Arquitectura del sistema
+
+```
+                 ┌──────────────────────────────────────┐
+                 │  SUPABASE DEL BANCO CENTRAL          │
+                 │  cuentas · saldos · transacciones    │
+                 │  nodos · api_keys · auth             │
+                 └──────────────────▲───────────────────┘
+                                    │ (solo el servidor del Central)
+                 ┌──────────────────┴───────────────────┐
+                 │  BANCO CENTRAL (Laravel)             │
+                 │  Panel admin + API core              │  → Render
+                 └───────▲──────────────────────▲───────┘
+               X-API-Key │                      │ X-API-Key
+        ┌────────────────┴──────┐      ┌────────┴──────────────┐
+        │  SUCURSAL (Nodo 2)    │      │  CAJERO ATM (Nodo 3)  │  → Vercel
+        │  Apertura de cuentas  │      │  Express              │
+        │  Consultas, reportes  │      │  Retiros, depósitos   │
+        └───────────────────────┘      └──────────┬────────────┘
+                 → Render                         │
+                                       ┌──────────▼────────────┐
+                                       │  SUPABASE DEL CAJERO  │
+                                       │  config · efectivo ·  │
+                                       │  bitácora · eventos   │
+                                       └───────────────────────┘
+```
+
+Los nodos nunca se comunican entre sí: cada uno habla **solo con el Banco Central**, que valida su API Key y consolida todos los movimientos.
 
 ## Papel del cajero en el sistema
-
-```
-   ┌────────────────────────────┐
-   │  BANCO CENTRAL (Laravel)   │   BD central (Supabase):
-   │  API core                  │   cuentas, saldos, transacciones oficiales,
-   └─────────────▲──────────────┘   efectivo asignado a cada nodo
-                 │ HTTPS + X-API-Key
-   ┌─────────────┴──────────────┐
-   │   CAJERO ATM (Express)     │   BD propia del cajero (Supabase, otro proyecto):
-   │   reglas locales + UI      │──▶ configuración, efectivo físico,
-   └─────────────▲──────────────┘   bitácora de operaciones y eventos
-                 │
-              Cliente
-```
 
 - **Descentralizado para la operación:** el cajero tiene su propia base de datos, su propia interfaz y su propio despliegue. Valida montos y su efectivo **sin consultar al Central**, y registra en su bitácora todo lo que pasa por él.
 - **Centralizado para la consolidación:** el cajero **no guarda saldos de clientes ni las transacciones oficiales**. Cada retiro o depósito lo aprueba y registra el Banco Central; la bitácora local solo guarda el folio que devolvió el Central.
